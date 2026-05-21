@@ -35,6 +35,19 @@ async function clientPingUrl(url) {
   } catch { return false; }
 }
 
+// Race multiple URLs: resolve true as soon as any one passes ping.
+async function clientPingAny(...urls) {
+  const checks = urls.filter(Boolean).map(clientPingUrl);
+  if (!checks.length) return false;
+  return new Promise((resolve) => {
+    let pending = checks.length;
+    checks.forEach((p) => p.then((ok) => {
+      if (ok) resolve(true);
+      else if (--pending === 0) resolve(false);
+    }));
+  });
+}
+
 const CAVEMAN_LEVELS = [
   { id: "lite", label: "Lite", desc: "Drop filler, keep grammar" },
   { id: "full", label: "Full", desc: "Drop articles, fragments OK" },
@@ -121,21 +134,20 @@ export default function APIPageClient({ machineId }) {
     loadSettings();
   }, []);
 
-  // Adaptive status poll: slow when healthy, fast when degraded; pause when tab hidden.
+  // Status poll: only while degraded (not yet reachable). Stop once healthy to avoid spam.
+  // Visibility re-check: refresh once when tab becomes visible.
   useEffect(() => {
     const anyEnabled = tunnelEnabled || tsEnabled;
     if (!anyEnabled) return;
     const tunnelHealthy = !tunnelEnabled || tunnelReachable;
     const tsHealthy = !tsEnabled || tsReachable;
     const allHealthy = tunnelHealthy && tsHealthy;
-    const delay = allHealthy ? STATUS_POLL_SLOW_MS : STATUS_POLL_FAST_MS;
-    let timer = null;
-    const tick = () => { if (!document.hidden) syncTunnelStatus(); };
-    timer = setInterval(tick, delay);
     const onVisible = () => { if (!document.hidden) syncTunnelStatus(); };
     document.addEventListener("visibilitychange", onVisible);
+    if (allHealthy) return () => document.removeEventListener("visibilitychange", onVisible);
+    const timer = setInterval(() => { if (!document.hidden) syncTunnelStatus(); }, STATUS_POLL_FAST_MS);
     return () => {
-      if (timer) clearInterval(timer);
+      clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [tunnelEnabled, tsEnabled, tunnelReachable, tsReachable]);
@@ -146,8 +158,8 @@ export default function APIPageClient({ machineId }) {
   useEffect(() => {
     const probeBoth = async () => {
       if (document.hidden) return;
-      if (tunnelEnabled && tunnelUrl) {
-        const ok = await clientPingUrl(tunnelUrl);
+      if (tunnelEnabled && (tunnelUrl || tunnelPublicUrl)) {
+        const ok = await clientPingAny(tunnelPublicUrl, tunnelUrl);
         tunnelClientReachableRef.current = ok;
         if (ok) { tunnelMissRef.current = 0; setTunnelReachable(true); if (!tunnelEverReachableRef.current) { tunnelEverReachableRef.current = true; setTunnelEverReachable(true); } }
       } else {
@@ -161,21 +173,20 @@ export default function APIPageClient({ machineId }) {
         tsClientReachableRef.current = false;
       }
     };
-    const anyEnabled = (tunnelEnabled && tunnelUrl) || (tsEnabled && tsUrl);
+    const anyEnabled = (tunnelEnabled && (tunnelUrl || tunnelPublicUrl)) || (tsEnabled && tsUrl);
     if (!anyEnabled) return;
     probeBoth();
     const tunnelHealthy = !tunnelEnabled || tunnelReachable;
     const tsHealthy = !tsEnabled || tsReachable;
-    const allHealthy = tunnelHealthy && tsHealthy;
-    const delay = allHealthy ? CLIENT_PING_SLOW_MS : CLIENT_PING_FAST_MS;
-    const id = setInterval(probeBoth, delay);
+    if (tunnelHealthy && tsHealthy) return;
+    const id = setInterval(probeBoth, CLIENT_PING_FAST_MS);
     return () => clearInterval(id);
-  }, [tunnelEnabled, tunnelUrl, tsEnabled, tsUrl, tunnelReachable, tsReachable]);
+  }, [tunnelEnabled, tunnelUrl, tunnelPublicUrl, tsEnabled, tsUrl, tunnelReachable, tsReachable]);
 
-  // Effective reachable = serverReachable OR clientReachable (1 of 2 is enough).
-  // Miss-debounce: only flip to false after N consecutive misses on BOTH sides.
-  const updateReachable = useCallback((serverReachable, clientRef, missRef, setter, everRef, everSetter) => {
-    const reachable = serverReachable || clientRef.current;
+  // Client-side reachable only (server no longer probes; watchdog handles backend health).
+  // Miss-debounce: only flip to false after N consecutive misses.
+  const updateReachable = useCallback((_unused, clientRef, missRef, setter, everRef, everSetter) => {
+    const reachable = clientRef.current;
     if (reachable) {
       missRef.current = 0;
       setter(true);
@@ -200,13 +211,13 @@ export default function APIPageClient({ machineId }) {
       setTunnelUrl(tUrl);
       setTunnelPublicUrl(data.tunnel?.publicUrl || "");
       setTunnelEnabled(tEnabled);
-      updateReachable(!!data.tunnel?.reachable, tunnelClientReachableRef, tunnelMissRef, setTunnelReachable, tunnelEverReachableRef, setTunnelEverReachable);
+      updateReachable(null, tunnelClientReachableRef, tunnelMissRef, setTunnelReachable, tunnelEverReachableRef, setTunnelEverReachable);
 
       const tsEn = data.tailscale?.settingsEnabled ?? data.tailscale?.enabled ?? false;
       const tsUrlVal = data.tailscale?.tunnelUrl || "";
       setTsUrl(tsUrlVal);
       setTsEnabled(tsEn);
-      updateReachable(!!data.tailscale?.reachable, tsClientReachableRef, tsMissRef, setTsReachable, tsEverReachableRef, setTsEverReachable);
+      updateReachable(null, tsClientReachableRef, tsMissRef, setTsReachable, tsEverReachableRef, setTsEverReachable);
     } catch { /* ignore poll errors */ }
   };
 
@@ -234,13 +245,13 @@ export default function APIPageClient({ machineId }) {
         setTunnelUrl(tUrl);
         setTunnelPublicUrl(data.tunnel?.publicUrl || "");
         setTunnelEnabled(tEnabled);
-        updateReachable(!!data.tunnel?.reachable, tunnelClientReachableRef, tunnelMissRef, setTunnelReachable, tunnelEverReachableRef, setTunnelEverReachable);
+        updateReachable(null, tunnelClientReachableRef, tunnelMissRef, setTunnelReachable, tunnelEverReachableRef, setTunnelEverReachable);
 
         const tsEn = data.tailscale?.settingsEnabled ?? data.tailscale?.enabled ?? false;
         const tsUrlVal = data.tailscale?.tunnelUrl || "";
         setTsUrl(tsUrlVal);
         setTsEnabled(tsEn);
-        updateReachable(!!data.tailscale?.reachable, tsClientReachableRef, tsMissRef, setTsReachable, tsEverReachableRef, setTsEverReachable);
+        updateReachable(null, tsClientReachableRef, tsMissRef, setTsReachable, tsEverReachableRef, setTsEverReachable);
       }
     } catch (error) {
       console.log("Error loading settings:", error);
@@ -325,23 +336,25 @@ export default function APIPageClient({ machineId }) {
   };
 
   // u2500u2500u2500 Cloudflare Tunnel handlers
-  // Ping tunnel health until reachable, also check backend status to detect process die
-  const pingTunnelHealth = async (url) => {
+  // Ping tunnel health until reachable. Race multiple URLs (shortlink + direct) — 1 OK is enough.
+  const pingTunnelHealth = async (...urls) => {
     setTunnelLoading(true);
     setTunnelProgress("Waiting for tunnel ready...");
-    const healthUrl = `${url}/api/health`;
+    const targets = urls.filter(Boolean).map((u) => `${u}/api/health`);
     const start = Date.now();
     while (Date.now() - start < TUNNEL_PING_MAX_MS) {
       await new Promise((r) => setTimeout(r, TUNNEL_PING_INTERVAL_MS));
-      try {
-        const ping = await fetch(healthUrl, { mode: "no-cors", cache: "no-store" });
-        if (ping.ok || ping.type === "opaque") {
-          setTunnelEnabled(true);
-          setTunnelLoading(false);
-          setTunnelProgress("");
-          return true;
-        }
-      } catch { /* not ready yet */ }
+      const ok = await Promise.any(targets.map(async (h) => {
+        const p = await fetch(h, { mode: "no-cors", cache: "no-store" });
+        if (p.ok || p.type === "opaque") return true;
+        throw new Error("not ready");
+      })).catch(() => false);
+      if (ok) {
+        setTunnelEnabled(true);
+        setTunnelLoading(false);
+        setTunnelProgress("");
+        return true;
+      }
       // Every 5 pings (~10s), check if backend process still alive
       if ((Date.now() - start) % 10000 < TUNNEL_PING_INTERVAL_MS) {
         try {
@@ -407,7 +420,7 @@ export default function APIPageClient({ machineId }) {
 
       setTunnelUrl(url);
       setTunnelPublicUrl(data.publicUrl || "");
-      await pingTunnelHealth(url);
+      await pingTunnelHealth(data.publicUrl, url);
     } catch (error) {
       setTunnelStatus({ type: "error", message: error.message });
     } finally {
