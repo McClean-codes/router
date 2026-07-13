@@ -1,5 +1,6 @@
 import { handleChat } from "@/sse/handlers/chat.js";
 import { initTranslators } from "open-sse/translator/index.js";
+import { withTenantContext } from "@/lib/tenant-context.js";
 
 let initialized = false;
 
@@ -24,7 +25,7 @@ export async function OPTIONS() {
  * POST /v1/responses - OpenAI Responses API format
  * Now handled by translator pattern (openai-responses format auto-detected)
  */
-export async function POST(request) {
+export const POST = withTenantContext(async function POST(request) {
   await ensureInitialized();
   return await handleChat(request);
-}
+});
