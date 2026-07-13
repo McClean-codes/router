@@ -13,6 +13,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { jwtVerify } from "jose";
 import { getTierPolicy, ANONYMOUS_TIER } from "@/tenant/tier-policy.js";
+import { checkRateLimit, getRateLimitKey } from "@/tenant/rate-limiter.js";
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -114,6 +115,28 @@ export function withTenantContext(handler) {
     } else {
       // No token or no secret configured → anonymous
       tenantCtx = buildAnonymousContext(extractClientIp(request));
+    }
+
+    // ── Rate limit check (M4) ────────────────────────────────────
+    const policy = getTierPolicy(tenantCtx.tier);
+    if (policy) {
+      const ip = extractClientIp(request);
+      const key = getRateLimitKey(tenantCtx.tenant_id, ip);
+      const result = checkRateLimit(key, policy.rate_limits.requests_per_minute);
+
+      if (!result.allowed) {
+        return new Response(
+          JSON.stringify({ error: "Rate limit exceeded", retry_after: result.retryAfter }),
+          {
+            status: 429,
+            headers: {
+              "Retry-After": String(result.retryAfter),
+              "X-RateLimit-Remaining": "0",
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
     }
 
     // Run handler inside AsyncLocalStorage so getTenantContext() works downstream
