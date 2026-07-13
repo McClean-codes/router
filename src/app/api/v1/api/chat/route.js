@@ -1,6 +1,7 @@
 import { handleChat } from "@/sse/handlers/chat.js";
 import { initTranslators } from "open-sse/translator/index.js";
 import { transformToOllama } from "open-sse/utils/ollamaTransform.js";
+import { withTenantContext } from "@/lib/tenant-context.js";
 
 let initialized = false;
 
@@ -21,7 +22,7 @@ export async function OPTIONS() {
   });
 }
 
-export async function POST(request) {
+export const POST = withTenantContext(async function POST(request) {
   await ensureInitialized();
   
   const clonedReq = request.clone();

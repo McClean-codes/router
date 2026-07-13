@@ -1,4 +1,5 @@
 import { handleTts } from "@/sse/handlers/tts.js";
+import { withTenantContext } from "@/lib/tenant-context.js";
 
 export async function OPTIONS() {
   return new Response(null, {
@@ -11,6 +12,6 @@ export async function OPTIONS() {
 }
 
 /** POST /v1/audio/speech - OpenAI-compatible TTS endpoint */
-export async function POST(request) {
+export const POST = withTenantContext(async function POST(request) {
   return await handleTts(request);
-}
+});

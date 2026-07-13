@@ -1,3 +1,4 @@
+import { getTenantContext } from "@/lib/tenant-context.js";
 import {
   extractApiKey, isValidApiKey,
   getProviderCredentials, markAccountUnavailable,
@@ -28,8 +29,9 @@ export async function handleStt(request) {
   const modelStr = formData.get("model");
   log.request("POST", `/v1/audio/transcriptions | ${modelStr}`);
 
+  const tenantCtx = getTenantContext();
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !tenantCtx?.jwt) {
     const apiKey = extractApiKey(request);
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     const valid = await isValidApiKey(apiKey);

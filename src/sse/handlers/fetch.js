@@ -1,3 +1,4 @@
+import { getTenantContext } from "@/lib/tenant-context.js";
 import {
   getProviderCredentials,
   markAccountUnavailable,
@@ -47,9 +48,10 @@ export async function handleFetch(request) {
     log.debug("AUTH", "No API key provided (local mode)");
   }
 
-  // Enforce API key if enabled in settings
+  // Enforce API key if enabled in settings — skip if tenant has valid JWT
+  const tenantCtx = getTenantContext();
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !tenantCtx?.jwt) {
     if (!apiKey) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");

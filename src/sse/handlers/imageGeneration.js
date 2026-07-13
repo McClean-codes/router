@@ -1,3 +1,4 @@
+import { getTenantContext } from "@/lib/tenant-context.js";
 import {
   getProviderCredentials,
   markAccountUnavailable,
@@ -35,9 +36,10 @@ export async function handleImageGeneration(request) {
   const binaryOutput = url.searchParams.get("response_format") === "binary";
   const modelStr = body.model;
 
+  const tenantCtx = getTenantContext();
   const apiKey = extractApiKey(request);
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !tenantCtx?.jwt) {
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     const valid = await isValidApiKey(apiKey);
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");

@@ -1,3 +1,4 @@
+import { getTenantContext } from "@/lib/tenant-context.js";
 import {
   extractApiKey, isValidApiKey,
   getProviderCredentials, markAccountUnavailable,
@@ -32,8 +33,9 @@ export async function handleTts(request) {
   const language = body.language || ""; // Optional language hint (currently used by Gemini)
   log.request("POST", `${url.pathname} | ${modelStr} | format=${responseFormat}${language ? ` | lang=${language}` : ""}`);
 
+  const tenantCtx = getTenantContext();
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !tenantCtx?.jwt) {
     const apiKey = extractApiKey(request);
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     const valid = await isValidApiKey(apiKey);
