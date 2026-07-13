@@ -8,6 +8,8 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { getTenantCredentials } from "@/lib/tenant-key-resolver.js";
+import { getTenantContext } from "@/lib/tenant-context.js";
+import { isProviderAllowed } from "@/tenant/tier-policy.js";
 import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
@@ -63,9 +65,10 @@ export async function handleChat(request, clientRawRequest = null) {
     log.debug("AUTH", "No API key provided (local mode)");
   }
 
-  // Enforce API key if enabled in settings
+  // Enforce API key if enabled in settings — skip if tenant has valid JWT
+  const tenantCtx = getTenantContext();
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !tenantCtx?.jwt) {
     if (!apiKey) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
@@ -185,6 +188,16 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   }
 
   const { provider, model } = modelInfo;
+
+  // ── Tier enforcement: provider filter (M2) ─────────────────────
+  const tenantCtxForFilter = getTenantContext();
+  if (tenantCtxForFilter && !isProviderAllowed(tenantCtxForFilter.tier, provider)) {
+    log.warn("TIER", `Provider \"${provider}\" not allowed for tier \"${tenantCtxForFilter.tier}\"`);
+    return errorResponse(
+      HTTP_STATUS.FORBIDDEN,
+      `Provider \"${provider}\" is not available on your plan (${tenantCtxForFilter.tier}). Upgrade to access this provider.`
+    );
+  }
 
   // Routing shown in the unified "▶" line (client model → provider/model)
 

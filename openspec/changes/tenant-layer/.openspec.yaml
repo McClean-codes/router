@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-07-12
+goal: Enable agent-service clients to authenticate via JWT, use their own
+  provider keys from Infisical, and see available providers via a user-facing
+  endpoint
