@@ -45,6 +45,7 @@ function setCache(provider, tenantId, value) {
 
 /**
  * Mint a short-lived Infisical access token using Universal Auth.
+ * Retries once with 500ms delay on failure.
  * Returns the access token string, or null on failure.
  */
 async function mintInfisicalToken() {
@@ -52,21 +53,34 @@ async function mintInfisicalToken() {
   const clientSecret = process.env.INFISICAL_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
 
-  try {
-    const resp = await fetch(
-      "https://app.infisical.com/api/v1/auth/universal-auth/login",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, clientSecret }),
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const resp = await fetch(
+        "https://app.infisical.com/api/v1/auth/universal-auth/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId, clientSecret }),
+        }
+      );
+      if (!resp.ok) {
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+        return null;
       }
-    );
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    return data.accessToken;
-  } catch {
-    return null;
+      const data = await resp.json();
+      return data.accessToken;
+    } catch {
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      return null;
+    }
   }
+  return null;
 }
 
 /**
@@ -149,5 +163,6 @@ export async function getTenantCredentials(provider) {
     isActive: true,
     accessToken: apiKey,
     providerSpecificData: {},
+    skipRefresh: true, // synthetic credential — no DB row to refresh
   };
 }

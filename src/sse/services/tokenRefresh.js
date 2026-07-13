@@ -219,6 +219,9 @@ export async function updateProviderCredentials(connectionId, newCredentials) {
  * @returns {Promise<object>} updated credentials object
  */
 export async function checkAndRefreshToken(provider, credentials) {
+  // Synthetic tenant credentials (from Infisical) don't need refresh
+  if (credentials.skipRefresh) return credentials;
+
   let creds = { ...credentials };
   if (!creds.connectionId && creds.id) {
     creds.connectionId = creds.id;
